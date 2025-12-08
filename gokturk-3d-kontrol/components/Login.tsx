@@ -34,7 +34,6 @@ const Login: React.FC<Props> = ({ onLogin }) => {
       
       <div className="w-full max-w-md p-8 bg-slate-800 rounded-2xl shadow-2xl border border-slate-700 relative z-10">
         <div className="flex flex-col items-center mb-8">
-          </div>
           <h1 className="text-2xl font-bold text-white tracking-widest">GÖKTÜRK</h1>
           <p className="text-slate-500 text-sm uppercase tracking-wide">3D Yazıcı Kontrol</p>
         </div>
