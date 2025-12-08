@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Plane, Lock, User, AlertCircle } from 'lucide-react';
+import { Lock, User, AlertCircle } from 'lucide-react';
 import { authService } from '../services/authService';
 
 interface Props {
@@ -35,10 +35,10 @@ const Login: React.FC<Props> = ({ onLogin }) => {
       <div className="w-full max-w-md p-8 bg-slate-800 rounded-2xl shadow-2xl border border-slate-700 relative z-10">
         <div className="flex flex-col items-center mb-8">
           <div className="w-16 h-16 bg-red-600 rounded-full flex items-center justify-center mb-4 shadow-lg shadow-red-900/50 animate-pulse-slow">
-            <Plane className="text-white w-10 h-10" />
+            <img src="assets/logo.png" alt="Takım Logosu" className="w-10 h-10 object-contain" />
           </div>
           <h1 className="text-2xl font-bold text-white tracking-widest">GÖKTÜRK</h1>
-          <p className="text-slate-500 text-sm uppercase tracking-wide">3D Komuta Kontrol Sistemi</p>
+          <p className="text-slate-500 text-sm uppercase tracking-wide">3D Yazıcı Kontrol</p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-6">
@@ -85,11 +85,6 @@ const Login: React.FC<Props> = ({ onLogin }) => {
             {loading ? 'Giriş Yapılıyor...' : 'Sisteme Bağlan'}
           </button>
         </form>
-
-        <div className="mt-6 text-center text-xs text-slate-600">
-          <p>Admin: admin / 1234</p>
-          <p>İzleyici: izleyici / 1234</p>
-        </div>
       </div>
     </div>
   );
