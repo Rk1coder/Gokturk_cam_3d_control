@@ -1,7 +1,9 @@
+--- START OF FILE components/Dashboard.tsx ---
+
 import React from 'react';
 import { PrinterState, PrinterStatus } from '../types';
 import TemperatureChart from './TemperatureChart';
-import { Activity, Clock, FileCode, CheckCircle2, AlertCircle } from 'lucide-react';
+import { Activity, Clock, FileCode, CheckCircle2, AlertCircle, VideoOff } from 'lucide-react';
 
 interface Props {
   printerState: PrinterState;
@@ -52,16 +54,29 @@ const Dashboard: React.FC<Props> = ({ printerState }) => {
          )}
       </div>
 
-      {/* Camera Feed Mockup */}
-      <div className="col-span-1 lg:col-span-2 bg-black rounded-lg border border-slate-700 shadow-lg relative aspect-video overflow-hidden group">
-          <img 
-            src="https://picsum.photos/800/450?grayscale" 
-            alt="Printer Cam" 
-            className="w-full h-full object-cover opacity-60 group-hover:opacity-80 transition"
-          />
-          <div className="absolute top-2 left-2 bg-red-600 px-2 py-0.5 rounded text-xs font-bold text-white animate-pulse">CANLI</div>
-          <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-4">
-              <p className="text-white font-mono text-sm">KAMERA 1 - ANA GÖRÜNÜM</p>
+      {/* Camera Feed - LIVE UPDATE */}
+      <div className="col-span-1 lg:col-span-2 bg-black rounded-lg border border-slate-700 shadow-lg relative aspect-video overflow-hidden group flex items-center justify-center">
+          {printerState.lastFrame ? (
+              <img 
+                src={`data:image/jpeg;base64,${printerState.lastFrame}`} 
+                alt="Printer Live Cam" 
+                className="w-full h-full object-contain"
+              />
+          ) : (
+              <div className="flex flex-col items-center text-slate-500">
+                  <VideoOff size={48} className="mb-2 opacity-50" />
+                  <span>Kamera Sinyali Yok</span>
+              </div>
+          )}
+          
+          {printerState.lastFrame && (
+            <div className="absolute top-2 left-2 bg-red-600 px-2 py-0.5 rounded text-xs font-bold text-white animate-pulse shadow-md">
+                CANLI
+            </div>
+          )}
+          
+          <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-4 pointer-events-none">
+              <p className="text-white font-mono text-xs opacity-70">GÖKTÜRK CAM SYSTEM</p>
           </div>
       </div>
 

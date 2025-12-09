@@ -1,3 +1,5 @@
+--- START OF FILE components/Settings.tsx ---
+
 import React, { useState } from 'react';
 import { Wifi, Save, Copy, Terminal, Plus, Trash2, WifiOff, ShieldAlert } from 'lucide-react';
 import { printerService } from '../services/printerService';
@@ -7,70 +9,179 @@ interface Props {
     userRole: UserRole;
 }
 
+// GÜNCELLENMİŞ PYTHON KODU (Senin verdiğin versiyon)
 const PYTHON_SERVER_CODE = `import asyncio
 import websockets
 import serial
 import json
 import time
+import cv2
+import base64
 
 # --- AYARLAR ---
-SERIAL_PORT = '/dev/ttyUSB0' # Yazıcının bağlı olduğu port
+SERIAL_PORT = '/dev/ttyUSB0'  # Yazıcının bağlı olduğu port
 BAUD_RATE = 115200
 WS_PORT = 8765
+CAMERA_INDEX = 0  # 0 = varsayılan USB kamera, 1 = ikinci kamera
 
-# --- UZAKTAN ERISIM ICIN (Opsiyonel) ---
-# Eger ngrok kullaniyorsaniz:
-# ngrok http 8765
-# Web arayuzune ngrok adresini (wss://...) giriniz.
+# Global değişkenler
+camera = None
+camera_active = False
+
+def init_camera():
+    """Kamerayı başlat"""
+    global camera, camera_active
+    try:
+        camera = cv2.VideoCapture(CAMERA_INDEX)
+        if camera.isOpened():
+            # Kamera çözünürlüğünü ayarla (opsiyonel)
+            camera.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+            camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+            camera_active = True
+            print("Kamera başarıyla başlatıldı")
+            return True
+        else:
+            print("Kamera açılamadı")
+            return False
+    except Exception as e:
+        print(f"Kamera başlatma hatası: {e}")
+        return False
 
 async def printer_server(websocket):
-    print("Client baglandi.")
+    global camera, camera_active
+    
+    print("Client bağlandı.")
+    
+    # Seri port bağlantısı
     try:
         ser = serial.Serial(SERIAL_PORT, BAUD_RATE, timeout=1)
-        print(f"Seri port acildi: {SERIAL_PORT}")
+        print(f"Seri port açıldı: {SERIAL_PORT}")
     except Exception as e:
-        print(f"Seri port hatasi: {e}")
-        await websocket.send(json.dumps({"type": "LOG", "data": f"Seri Port Hatasi: {e}"}))
-        return
-
+        print(f"Seri port hatası: {e}")
+        await websocket.send(json.dumps({"type": "LOG", "data": f"Seri Port Hatası: {e}"}))
+        ser = None
+    
+    # Kamera başlat (eğer başlatılmamışsa)
+    if not camera_active:
+        init_camera()
+    
+    # Seri porttan okuma
     async def read_serial():
+        if ser is None:
+            return
         while True:
-            if ser.in_waiting > 0:
-                line = ser.readline().decode('utf-8', errors='ignore').strip()
-                if line:
-                    await websocket.send(json.dumps({"type": "LOG", "data": line}))
+            try:
+                if ser.in_waiting > 0:
+                    line = ser.readline().decode('utf-8', errors='ignore').strip()
+                    if line:
+                        await websocket.send(json.dumps({"type": "LOG", "data": line}))
+            except Exception as e:
+                print(f"Seri okuma hatası: {e}")
             await asyncio.sleep(0.1)
-
+    
+    # Kamera streaming
+    async def stream_camera():
+        global camera, camera_active
+        
+        while True:
+            try:
+                if camera_active and camera is not None and camera.isOpened():
+                    ret, frame = camera.read()
+                    if ret:
+                        # Frame'i küçült (bandwidth tasarrufu)
+                        frame = cv2.resize(frame, (640, 480))
+                        
+                        # JPEG'e çevir (kalite: 80)
+                        _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
+                        
+                        # Base64'e çevir
+                        jpg_as_text = base64.b64encode(buffer).decode('utf-8')
+                        
+                        # WebSocket üzerinden gönder
+                        await websocket.send(json.dumps({
+                            "type": "VIDEO",
+                            "data": jpg_as_text
+                        }))
+                        
+                        await asyncio.sleep(0.05)  # ~20 FPS
+                    else:
+                        await asyncio.sleep(1)
+                else:
+                    await asyncio.sleep(1)
+                    
+            except Exception as e:
+                print(f"Kamera streaming hatası: {e}")
+                await asyncio.sleep(1)
+    
+    # WebSocket mesajlarını dinle
     async def listen_socket():
+        global camera, camera_active
+        
         async for message in websocket:
             try:
                 data = json.loads(message)
-                if data.get('command') == 'GCODE':
+                command = data.get('command')
+                
+                if command == 'GCODE':
                     code = data.get('code')
-                    print(f"GCode Alindi: {code}")
-                    ser.write(f"{code}\\n".encode())
-                elif data.get('command') == 'START_PRINT':
+                    print(f"GCode Alındı: {code}")
+                    if ser:
+                        ser.write(f"{code}\\n".encode())
+                
+                elif command == 'START_PRINT':
                     await websocket.send(json.dumps({"type": "STATUS", "data": "Printing"}))
-                elif data.get('command') == 'STOP_PRINT':
-                    ser.write(b"M112\\n")
+                
+                elif command == 'STOP_PRINT':
+                    if ser:
+                        ser.write(b"M112\\n")  # Emergency stop
                     await websocket.send(json.dumps({"type": "STATUS", "data": "Operational"}))
-                elif data.get('command') == 'GET_STATUS':
-                     await websocket.send(json.dumps({"type": "STATUS", "data": "Operational"}))
+                
+                elif command == 'GET_STATUS':
+                    await websocket.send(json.dumps({"type": "STATUS", "data": "Operational"}))
+                
+                elif command == 'CAMERA_ON':
+                    if not camera_active:
+                        init_camera()
+                    await websocket.send(json.dumps({"type": "LOG", "data": "Kamera açıldı"}))
+                
+                elif command == 'CAMERA_OFF':
+                    camera_active = False
+                    if camera is not None:
+                        camera.release()
+                        camera = None
+                    await websocket.send(json.dumps({"type": "LOG", "data": "Kamera kapatıldı"}))
+                    
             except Exception as e:
-                print(f"Hata: {e}")
-
-    await asyncio.gather(read_serial(), listen_socket())
+                print(f"Mesaj işleme hatası: {e}")
+    
+    # Tüm görevleri paralel çalıştır
+    try:
+        await asyncio.gather(
+            read_serial(),
+            stream_camera(),
+            listen_socket()
+        )
+    except Exception as e:
+        print(f"Sunucu hatası: {e}")
+    finally:
+        if ser:
+            ser.close()
 
 async def main():
     async with websockets.serve(printer_server, "0.0.0.0", WS_PORT):
-        print(f"Sunucu baslatildi: ws://0.0.0.0:{WS_PORT}")
+        print(f"Sunucu başlatıldı: ws://0.0.0.0:{WS_PORT}")
+        print("Kamera başlatılıyor...")
+        init_camera()
         await asyncio.Future()
 
 if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        print("Kapatiliyor...")
+        print("\\nKapatılıyor...")
+        if camera:
+            camera.release()
+        cv2.destroyAllWindows()
 `;
 
 // Helper component to display existing printers
@@ -229,7 +340,7 @@ const Settings: React.FC<Props> = ({ userRole }) => {
                <h3 className="text-lg font-bold text-white flex items-center">
                  <Terminal className="w-5 h-5 mr-2 text-green-500" /> Raspberry Pi Server Kodu
                </h3>
-               <p className="text-xs text-slate-500 mt-1">Bu kodu her Pi'ye 'server.py' olarak kaydedin.</p>
+               <p className="text-xs text-slate-500 mt-1">Bu kodu her Pi'ye 'server.py' olarak kaydedin (OpenCV gereklidir).</p>
            </div>
            <button 
              onClick={copyCode}
