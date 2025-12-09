@@ -1,4 +1,3 @@
---- START OF FILE components/Settings.tsx ---
 
 import React, { useState } from 'react';
 import { Wifi, Save, Copy, Terminal, Plus, Trash2, WifiOff, ShieldAlert } from 'lucide-react';
