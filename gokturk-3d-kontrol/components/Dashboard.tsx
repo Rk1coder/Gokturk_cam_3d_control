@@ -1,5 +1,3 @@
---- START OF FILE components/Dashboard.tsx ---
-
 import React from 'react';
 import { PrinterState, PrinterStatus } from '../types';
 import TemperatureChart from './TemperatureChart';
