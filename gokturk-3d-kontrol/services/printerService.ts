@@ -1,5 +1,3 @@
---- START OF FILE services/printerService.ts ---
-
 import { GlobalState, PrinterConfig, PrinterState, PrinterStatus, GCodeFile } from '../types';
 
 // Mock Data for Files
