@@ -1,12 +1,5 @@
 import { GlobalState, PrinterConfig, PrinterState, PrinterStatus, GCodeFile } from '../types';
 
-// Mock Data for Files
-export const MOCK_FILES: GCodeFile[] = [
-  { name: 'iron_man_mask.gcode', size: '14.2 MB', uploadDate: '2023-10-24', estimatedTime: '4h 12m' },
-  { name: 'benchy_boat.gcode', size: '3.1 MB', uploadDate: '2023-10-25', estimatedTime: '1h 05m' },
-  { name: 'phone_stand_v2.gcode', size: '5.8 MB', uploadDate: '2023-10-26', estimatedTime: '2h 30m' },
-];
-
 const INITIAL_PRINTER_STATE: PrinterState = {
   status: PrinterStatus.OFFLINE,
   temperatures: {
@@ -21,7 +14,7 @@ const INITIAL_PRINTER_STATE: PrinterState = {
   },
   wsConnected: false,
   logs: [],
-  lastFrame: null // Başlangıçta görüntü yok
+  lastFrame: null 
 };
 
 class PrinterService {
@@ -37,8 +30,6 @@ class PrinterService {
     this.loadFromStorage();
   }
 
-  // --- STATE MANAGEMENT ---
-  
   subscribe(listener: (state: GlobalState) => void) {
     this.listeners.push(listener);
     listener(this.state);
@@ -71,27 +62,17 @@ class PrinterService {
         this.state.activePrinterId = configs[0].id;
       }
       this.notify();
-      
-      // Auto connect logic could go here
       configs.forEach(c => this.connect(c.id));
     }
   }
 
-  // --- PRINTER ACTIONS ---
+  // --- ACTIONS ---
 
   addPrinter(config: Omit<PrinterConfig, 'id'>) {
     const id = Date.now().toString();
     const newConfig = { ...config, id };
-    
-    this.state.printers[id] = {
-      config: newConfig,
-      state: { ...INITIAL_PRINTER_STATE }
-    };
-    
-    if (!this.state.activePrinterId) {
-      this.state.activePrinterId = id;
-    }
-    
+    this.state.printers[id] = { config: newConfig, state: { ...INITIAL_PRINTER_STATE } };
+    if (!this.state.activePrinterId) this.state.activePrinterId = id;
     this.connect(id);
     this.notify();
   }
@@ -100,11 +81,7 @@ class PrinterService {
     this.disconnect(id);
     const { [id]: removed, ...others } = this.state.printers;
     this.state.printers = others;
-    
-    if (this.state.activePrinterId === id) {
-      this.state.activePrinterId = Object.keys(others)[0] || null;
-    }
-    
+    if (this.state.activePrinterId === id) this.state.activePrinterId = Object.keys(others)[0] || null;
     this.notify();
   }
 
@@ -115,42 +92,47 @@ class PrinterService {
     }
   }
 
-  // --- WEBSOCKET CONNECTION ---
+  // --- WEBSOCKET BAĞLANTISI ---
 
   connect(printerId: string) {
     const printer = this.state.printers[printerId];
     if (!printer || this.sockets[printerId]) return;
 
     try {
-      // Handle "ngrok" or local IP formatting if needed
-      let wsUrl = `ws://${printer.config.ip}:${printer.config.port}`;
+      // Eğer ngrok adresi girildiyse wss:// yap, değilse ws://
+      let protocol = 'ws://';
+      let host = `${printer.config.ip}:${printer.config.port}`;
+      
       if (printer.config.ip.includes('ngrok')) {
-        wsUrl = `wss://${printer.config.ip.replace('https://', '').replace('http://', '')}`;
+        protocol = 'wss://';
+        host = printer.config.ip.replace('http://', '').replace('https://', '');
       }
+
+      const wsUrl = `${protocol}${host}`;
+      console.log(`Bağlanılıyor: ${wsUrl}`);
 
       const ws = new WebSocket(wsUrl);
 
       ws.onopen = () => {
+        console.log("WebSocket Bağlandı");
         this.updatePrinterState(printerId, { 
           wsConnected: true, 
           status: PrinterStatus.IDLE,
-          logs: [...printer.state.logs, 'Sisteme Bağlanıldı.']
+          logs: [...printer.state.logs, 'Sistem Bağlandı.']
         });
-        // Bağlandığında kamerayı aç komutu gönder
         ws.send(JSON.stringify({ command: 'CAMERA_ON' }));
+        // Sıcaklıkları sormaya başla (M105 komutu) - Her 3 saniyede bir
+        this.startPollingTemp(printerId);
       };
 
       ws.onclose = () => {
+        console.log("WebSocket Kapandı");
         this.updatePrinterState(printerId, { 
           wsConnected: false, 
           status: PrinterStatus.OFFLINE,
-          logs: [...this.state.printers[printerId].state.logs, 'Bağlantı Kesildi.']
+          lastFrame: null // Görüntüyü sıfırla
         });
         delete this.sockets[printerId];
-      };
-
-      ws.onerror = (err) => {
-        console.error("WS Error", err);
       };
 
       ws.onmessage = (event) => {
@@ -158,29 +140,30 @@ class PrinterService {
           const message = JSON.parse(event.data);
           
           if (message.type === 'LOG') {
+            // Gelen log satırını analiz et (Sıcaklık verisi var mı?)
+            this.parseLogForTemp(printerId, message.data);
+
             const currentLogs = this.state.printers[printerId].state.logs;
-            const newLogs = [...currentLogs, message.data].slice(-100); // Keep last 100 logs
+            const newLogs = [...currentLogs, message.data].slice(-50); 
             this.updatePrinterState(printerId, { logs: newLogs });
           } 
           else if (message.type === 'STATUS') {
              const statusStr = message.data === 'Printing' ? PrinterStatus.PRINTING : PrinterStatus.IDLE;
              this.updatePrinterState(printerId, { status: statusStr });
           }
-          // --- VİDEO İŞLEME EKLENDİ ---
           else if (message.type === 'VIDEO') {
-             // Gelen base64 verisini state'e yaz
+             // SADECE KAMERADAN GELEN VERİ
              this.updatePrinterState(printerId, { lastFrame: message.data });
           }
-          // ----------------------------
 
         } catch (e) {
-          console.error("Message parse error", e);
+          console.error("Mesaj hatası:", e);
         }
       };
 
       this.sockets[printerId] = ws;
     } catch (e) {
-      console.error("Connection failed", e);
+      console.error("Bağlantı hatası:", e);
     }
   }
 
@@ -193,6 +176,39 @@ class PrinterService {
     }
   }
 
+  // --- SICAKLIK ANALİZİ (PARSING) ---
+  private parseLogForTemp(printerId: string, logLine: string) {
+    // Marlin formatı: "ok T:200.0 /200.0 B:60.0 /60.0" veya benzeri
+    // Regex ile T (Nozzle) ve B (Bed) değerlerini yakala
+    const tempRegex = /T:(\d+\.?\d*)\s*\/(\d+\.?\d*)\s*B:(\d+\.?\d*)\s*\/(\d+\.?\d*)/;
+    const match = logLine.match(tempRegex);
+
+    if (match) {
+        const actualTool = parseFloat(match[1]);
+        const targetTool = parseFloat(match[2]);
+        const actualBed = parseFloat(match[3]);
+        const targetBed = parseFloat(match[4]);
+
+        this.updatePrinterState(printerId, {
+            temperatures: {
+                tool0: { actual: actualTool, target: targetTool },
+                bed: { actual: actualBed, target: targetBed }
+            }
+        });
+    }
+  }
+
+  private startPollingTemp(printerId: string) {
+      // 3 Saniyede bir sıcaklık sor
+      const interval = setInterval(() => {
+          if(!this.sockets[printerId] || !this.state.printers[printerId].state.wsConnected) {
+              clearInterval(interval);
+              return;
+          }
+          this.sendGCode("M105"); // Sıcaklık Raporu İste
+      }, 3000);
+  }
+
   private updatePrinterState(id: string, updates: Partial<PrinterState>) {
     if (this.state.printers[id]) {
       this.state.printers[id].state = {
@@ -203,21 +219,19 @@ class PrinterService {
     }
   }
 
-  // --- COMMANDS ---
+  // --- KOMUTLAR (Sadece Gönderir, Fake Güncelleme Yapmaz) ---
 
   sendGCode(code: string) {
     const id = this.state.activePrinterId;
     if (id && this.sockets[id]) {
       this.sockets[id].send(JSON.stringify({ command: 'GCODE', code }));
-      const currentLogs = this.state.printers[id].state.logs;
-      this.updatePrinterState(id, { logs: [...currentLogs, `GÖNDERİLDİ: ${code}`].slice(-100) });
     }
   }
 
   moveAxis(axis: 'x'|'y'|'z', distance: number) {
-    this.sendGCode(`G91`); // Relative positioning
+    this.sendGCode(`G91`); 
     this.sendGCode(`G1 ${axis.toUpperCase()}${distance} F3000`);
-    this.sendGCode(`G90`); // Back to absolute
+    this.sendGCode(`G90`); 
   }
 
   homeAxis(axes: string[]) {
@@ -227,28 +241,13 @@ class PrinterService {
   setTemperature(type: 'tool0' | 'bed', temp: number) {
      const code = type === 'tool0' ? `M104 S${temp}` : `M140 S${temp}`;
      this.sendGCode(code);
-     const id = this.state.activePrinterId;
-     if (id) {
-       const key = type;
-       this.state.printers[id].state.temperatures[key].target = temp;
-       this.notify();
-     }
   }
 
   startPrint(file: GCodeFile) {
      const id = this.state.activePrinterId;
      if(id && this.sockets[id]) {
          this.sockets[id].send(JSON.stringify({ command: 'START_PRINT', file: file.name }));
-         this.updatePrinterState(id, { 
-             status: PrinterStatus.PRINTING,
-             job: {
-                 file,
-                 progress: 0,
-                 printTime: 0,
-                 timeLeft: 3600 // mock
-             }
-         });
-         this.simulatePrintLoop(id);
+         // Simülasyon yok, yazıcıdan 'Printing' statusu gelince arayüz değişecek.
      }
   }
 
@@ -256,37 +255,7 @@ class PrinterService {
       const id = this.state.activePrinterId;
       if(id && this.sockets[id]) {
           this.sockets[id].send(JSON.stringify({ command: 'STOP_PRINT' }));
-          this.updatePrinterState(id, { status: PrinterStatus.IDLE });
       }
-  }
-
-  // --- SIMULATION HELPER ---
-  private simulatePrintLoop(printerId: string) {
-      const interval = setInterval(() => {
-          const p = this.state.printers[printerId];
-          if(!p || p.state.status !== PrinterStatus.PRINTING) {
-              clearInterval(interval);
-              return;
-          }
-
-          const newProgress = Math.min(p.state.job.progress + 0.5, 100);
-          this.updatePrinterState(printerId, {
-              job: {
-                  ...p.state.job,
-                  progress: newProgress,
-                  printTime: p.state.job.printTime + 1
-              },
-              temperatures: {
-                  tool0: { ...p.state.temperatures.tool0, actual: p.state.temperatures.tool0.target + (Math.random() - 0.5) * 2 },
-                  bed: { ...p.state.temperatures.bed, actual: p.state.temperatures.bed.target + (Math.random() - 0.5) }
-              }
-          });
-
-          if (newProgress >= 100) {
-              this.updatePrinterState(printerId, { status: PrinterStatus.IDLE });
-              clearInterval(interval);
-          }
-      }, 1000);
   }
 
   getCurrentUser() {
